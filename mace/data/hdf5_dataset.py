@@ -62,6 +62,7 @@ class HDF5Dataset(Dataset):
             forces_weight=unpack_value(subgrp["forces_weight"][()]),
             stress_weight=unpack_value(subgrp["stress_weight"][()]),
             virials_weight=unpack_value(subgrp["virials_weight"][()]),
+            charges_weight=unpack_value(subgrp["charges_weight"][()]),
             config_type=unpack_value(subgrp["config_type"][()]),
             pbc=unpack_value(subgrp["pbc"][()]),
             cell=unpack_value(subgrp["cell"][()]),

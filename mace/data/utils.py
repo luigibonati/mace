@@ -46,6 +46,7 @@ class Configuration:
     forces_weight: float = 1.0  # weight of config forces in loss
     stress_weight: float = 1.0  # weight of config stress in loss
     virials_weight: float = 1.0  # weight of config virial in loss
+    charges_weight: float = 1.0  # weight of config charge in loss
     config_type: Optional[str] = DEFAULT_CONFIG_TYPE  # config_type of config
     head: Optional[str] = "Default"  # head used to compute the config
 
@@ -152,6 +153,7 @@ def config_from_atoms(
     forces_weight = atoms.info.get("config_forces_weight", 1.0)
     stress_weight = atoms.info.get("config_stress_weight", 1.0)
     virials_weight = atoms.info.get("config_virials_weight", 1.0)
+    charges_weight = atoms.info.get("config_charges_weight", 1.0)
 
     head = atoms.info.get(head_key, "Default")
 
@@ -187,6 +189,7 @@ def config_from_atoms(
         forces_weight=forces_weight,
         stress_weight=stress_weight,
         virials_weight=virials_weight,
+        charges_weight=charges_weight,
         config_type=config_type,
         pbc=pbc,
         cell=cell,
@@ -348,6 +351,7 @@ def save_dataset_as_HDF5(dataset: List, out_name: str) -> None:
             grp["forces_weight"] = data.forces_weight
             grp["stress_weight"] = data.stress_weight
             grp["virials_weight"] = data.virials_weight
+            grp["charges_weight"] = data.charges_weight
             grp["forces"] = data.forces
             grp["energy"] = data.energy
             grp["stress"] = data.stress
@@ -371,6 +375,7 @@ def save_AtomicData_to_HDF5(data, i, h5_file) -> None:
     grp["forces_weight"] = data.forces_weight
     grp["stress_weight"] = data.stress_weight
     grp["virials_weight"] = data.virials_weight
+    grp["charges_weight"] = data.charges_weight
     grp["forces"] = data.forces
     grp["energy"] = data.energy
     grp["stress"] = data.stress
@@ -401,6 +406,7 @@ def save_configurations_as_HDF5(configurations: Configurations, _, h5_file) -> N
         subgroup["forces_weight"] = write_value(config.forces_weight)
         subgroup["stress_weight"] = write_value(config.stress_weight)
         subgroup["virials_weight"] = write_value(config.virials_weight)
+        subgroup["charges_weight"] = write_value(config.charges_weight)
         subgroup["config_type"] = write_value(config.config_type)
 
 
