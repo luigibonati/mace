@@ -135,9 +135,9 @@ def valid_err_log(
     elif log_errors == "EnergyChargesRMSE":
         error_e = eval_metrics["rmse_e_per_atom"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
-        error_c = eval_metrics["rmse_c_per_atom"] * 1e3
+        error_c = eval_metrics["rmse_c"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A, RMSE_C_per_atom={error_c:8.2f} mq",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A, RMSE_C={error_c:8.2f} mq",
         )
 
 
@@ -462,7 +462,6 @@ class MACELoss(Metric):
         self.add_state("C_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("cs", default=[], dist_reduce_fx="cat")
         self.add_state("delta_cs", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_cs_per_atom", default=[], dist_reduce_fx="cat")
 
     def update(self, batch, output):  # pylint: disable=arguments-differ
         loss = self.loss_fn(pred=output, ref=batch)
@@ -501,10 +500,6 @@ class MACELoss(Metric):
             self.C_computed += 1.0
             self.cs.append(batch.charges)
             self.delta_cs.append(batch.charges - output["charges"])
-            self.delta_cs_per_atom.append(
-                (batch.charges - output["charges"])
-                / (batch.ptr[1:] - batch.ptr[:-1]).unsqueeze(-1)
-            )
 
     def convert(self, delta: Union[torch.Tensor, List[torch.Tensor]]) -> np.ndarray:
         if isinstance(delta, list):
@@ -556,12 +551,9 @@ class MACELoss(Metric):
         if self.C_computed:
             cs = self.convert(self.cs)
             delta_cs = self.convert(self.delta_cs)
-            delta_cs_per_atom = self.convert(self.delta_cs_per_atom)
             aux["mae_c"] = compute_mae(delta_cs)
-            aux["mae_c_per_atom"] = compute_mae(delta_cs_per_atom)
             aux["rel_mae_c"] = compute_rel_mae(delta_cs, cs)
             aux["rmse_c"] = compute_rmse(delta_cs)
-            aux["rmse_c_per_atom"] = compute_rmse(delta_cs_per_atom)
             aux["rel_rmse_c"] = compute_rel_rmse(delta_cs, cs)
             aux["q95_c"] = compute_q95(delta_cs)
 

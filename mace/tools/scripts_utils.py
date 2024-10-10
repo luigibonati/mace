@@ -926,7 +926,7 @@ def create_error_table(
                     f"{metrics['rmse_e_per_atom'] * 1000:8.1f}",
                     f"{metrics['rmse_f'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_f']:8.1f}",
-                    f"{metrics['rmse_c_per_atom'] * 1000:8.1f}",
+                    f"{metrics['rmse_c'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_c']:8.1f}",
                 ]
             )

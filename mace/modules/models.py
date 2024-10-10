@@ -1327,7 +1327,7 @@ class EnergyChargesMACE(torch.nn.Module):
         atomic_charges = torch.sum(contributions_charges, dim=-1)  # [n_nodes,1]
         total_charge = scatter_sum(
             src=atomic_charges,
-            index=data["batch"].unsqueeze(-1),
+            index=data["batch"],
             dim=0,
             dim_size=num_graphs,
         )  # [n_graphs,1]

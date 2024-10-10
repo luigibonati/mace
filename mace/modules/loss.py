@@ -163,7 +163,6 @@ def weighted_mean_squared_error_charges(ref: Batch, pred: TensorDict) -> torch.T
         configs_weight
         * configs_charges_weight
         * torch.square(ref["charges"] - pred["charges"])
-        * ref["peratom_weights"]
     )  # []
 
 
