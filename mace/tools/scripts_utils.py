@@ -385,6 +385,7 @@ def get_loss_fn(
     args: argparse.Namespace,
     dipole_only: bool,
     compute_dipole: bool,
+    compute_charges: bool,
 ) -> torch.nn.Module:
     if args.loss == "weighted":
         loss_fn = modules.WeightedEnergyForcesLoss(
@@ -431,6 +432,13 @@ def get_loss_fn(
             energy_weight=args.energy_weight,
             forces_weight=args.forces_weight,
             dipole_weight=args.dipole_weight,
+        )
+    elif args.loss == "energy_forces_charges":
+        assert compute_dipole is False and compute_charges is True
+        loss_fn = modules.WeightedEnergyForcesChargesLoss(
+            energy_weight=args.energy_weight,
+            forces_weight=args.forces_weight,
+            charges_weight=args.charges_weight,
         )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)
@@ -482,6 +490,15 @@ def get_swa(
         )
         logging.info(
             f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy}, with energy weight : {args.swa_energy_weight}, forces weight : {args.swa_forces_weight}, dipole weight : {args.swa_dipole_weight} and learning rate : {args.swa_lr}"
+        )
+    elif args.loss == "energy_forces_charges":
+        loss_fn_energy = modules.WeightedEnergyForcesChargesLoss(
+            args.swa_energy_weight,
+            forces_weight=args.swa_forces_weight,
+            charges_weight=args.swa_charges_weight,
+        )
+        logging.info(
+            f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy}, with energy weight : {args.swa_energy_weight}, forces weight : {args.swa_forces_weight}, charges weight : {args.swa_charges_weight} and learning rate : {args.swa_lr}"
         )
     elif args.loss == "universal":
         loss_fn_energy = modules.UniversalLoss(
@@ -753,6 +770,15 @@ def create_error_table(
             "RMSE MU / mDebye / atom",
             "rel MU RMSE %",
         ]
+    elif table_type == "EnergyChargesRMSE":
+        table.field_names = [
+            "config_type",
+            "RMSE E / meV / atom",
+            "RMSE F / meV / A",
+            "rel F RMSE %",
+            "RMSE C / mq / atom",
+            "rel C RMSE %",
+        ]
 
     for name in sorted(all_data_loaders, key=custom_key):
         data_loader = all_data_loaders[name]
@@ -891,6 +917,17 @@ def create_error_table(
                     f"{metrics['rel_rmse_f']:8.1f}",
                     f"{metrics['rmse_mu_per_atom'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_mu']:8.1f}",
+                ]
+            )
+        elif table_type == "EnergyChargesRMSE":
+            table.add_row(
+                [
+                    name,
+                    f"{metrics['rmse_e_per_atom'] * 1000:8.1f}",
+                    f"{metrics['rmse_f'] * 1000:8.1f}",
+                    f"{metrics['rel_rmse_f']:8.1f}",
+                    f"{metrics['rmse_c_per_atom'] * 1000:8.1f}",
+                    f"{metrics['rel_rmse_c']:8.1f}",
                 ]
             )
     return table

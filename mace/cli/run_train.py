@@ -387,6 +387,7 @@ def run(args: argparse.Namespace) -> None:
         args.compute_forces = False
         args.compute_virials = False
         args.compute_stress = False
+        args.compute_charges = False
     else:
         dipole_only = False
         if args.model == "EnergyDipolesMACE":
@@ -395,9 +396,18 @@ def run(args: argparse.Namespace) -> None:
             args.compute_forces = True
             args.compute_virials = False
             args.compute_stress = False
+            args.compute_charges = False
+        elif args.model == "EnergyChargesMACE":
+            args.compute_dipole = False
+            args.compute_energy = True
+            args.compute_forces = True
+            args.compute_virials = False
+            args.compute_stress = False
+            args.compute_charges = True
         else:
             args.compute_energy = True
             args.compute_dipole = False
+            args.compute_charges = False
         # atomic_energies: np.ndarray = np.array(
         #     [atomic_energies_dict[z] for z in z_table.zs]
         # )
@@ -498,7 +508,7 @@ def run(args: argparse.Namespace) -> None:
             generator=torch.Generator().manual_seed(args.seed),
         )
 
-    loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole)
+    loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole, args.compute_charges)
     args.avg_num_neighbors = get_avg_num_neighbors(head_configs, args, train_loader, device)
 
     # Model

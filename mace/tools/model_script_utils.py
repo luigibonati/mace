@@ -24,6 +24,8 @@ def configure_model(
         "virials": compute_virials,
         "stress": args.compute_stress,
         "dipoles": args.compute_dipole,
+        "charges": args.compute_charges,
+        "total_charge": args.compute_charges,
     }
     logging.info(
         f"During training the following quantities will be reported: {', '.join([f'{report}' for report, value in output_args.items() if value])}"
@@ -218,6 +220,22 @@ def _build_model(
             args.error_table == "EnergyDipoleRMSE"
         ), "Use error_table EnergyDipoleRMSE with AtomicDipolesMACE model"
         return modules.EnergyDipolesMACE(
+            **model_config,
+            correlation=args.correlation,
+            gate=modules.gate_dict[args.gate],
+            interaction_cls_first=modules.interaction_classes[
+                "RealAgnosticInteractionBlock"
+            ],
+            MLP_irreps=o3.Irreps(args.MLP_irreps),
+        )
+    if args.model == "EnergyChargesMACE":
+        assert (
+            args.loss == "energy_forces_charges"
+        ), "Use energy_forces_charges loss with EnergyChargesMACE model"
+        assert (
+            args.error_table == "EnergyChargesRMSE"
+        ), "Use error_table EnergyChargesRMSE with EnergyChargesMACE model"
+        return modules.EnergyChargesMACE(
             **model_config,
             correlation=args.correlation,
             gate=modules.gate_dict[args.gate],
