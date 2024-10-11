@@ -43,7 +43,7 @@ class MACECalculator(Calculator):
         default_dtype: str, default dtype of model
         charges_key: str, Array field of atoms object where atomic charges are stored
         model_type: str, type of model to load
-                    Options: [MACE, DipoleMACE, EnergyDipoleMACE]
+                    Options: [MACE, DipoleMACE, EnergyDipoleMACE, EnergyChargesMACE]
 
     Dipoles are returned in units of Debye
     """
@@ -104,6 +104,15 @@ class MACECalculator(Calculator):
                 "stress",
                 "dipole",
             ]
+        elif model_type == "EnergyChargesMACE":
+            self.implemented_properties = [
+                "energy",
+                "free_energy",
+                "node_energy",
+                "forces",
+                "stress",
+                "charges",
+            ]
         else:
             raise ValueError(
                 f"Give a valid model_type: [MACE, DipoleMACE, EnergyDipoleMACE], {model_type} not supported"
@@ -150,6 +159,10 @@ class MACECalculator(Calculator):
                 )
             elif model_type == "DipoleMACE":
                 self.implemented_properties.extend(["dipole_var"])
+            elif model_type == "EnergyChargesMACE":
+                self.implemented_properties.extend(
+                    ["energies", "energy_var", "forces_comm", "charges_comm"]
+                )
 
         if compile_mode is not None:
             print(f"Torch compile is enabled with mode: {compile_mode}")
@@ -216,7 +229,7 @@ class MACECalculator(Calculator):
         :return: tuple of torch tensors
         """
         dict_of_tensors = {}
-        if model_type in ["MACE", "EnergyDipoleMACE"]:
+        if model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
             energies = torch.zeros(num_models, device=self.device)
             node_energy = torch.zeros(num_models, num_atoms, device=self.device)
             forces = torch.zeros(num_models, num_atoms, 3, device=self.device)
@@ -232,6 +245,9 @@ class MACECalculator(Calculator):
         if model_type in ["EnergyDipoleMACE", "DipoleMACE"]:
             dipole = torch.zeros(num_models, 3, device=self.device)
             dict_of_tensors.update({"dipole": dipole})
+        if model_type == "EnergyChargesMACE":
+            charges = torch.zeros(num_models, num_atoms, 1, device=self.device)
+            dict_of_tensors.update({"charges": charges})
         return dict_of_tensors
 
     def _atoms_to_batch(self, atoms):
@@ -270,7 +286,7 @@ class MACECalculator(Calculator):
 
         batch_base = self._atoms_to_batch(atoms)
 
-        if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+        if self.model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
             batch = self._clone_batch(batch_base)
             node_heads = batch["head"][batch["batch"]]
             num_atoms_arange = torch.arange(batch["positions"].shape[0])
@@ -291,7 +307,7 @@ class MACECalculator(Calculator):
                 compute_stress=compute_stress,
                 training=self.use_compile,
             )
-            if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+            if self.model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
                 ret_tensors["energies"][i] = out["energy"].detach()
                 ret_tensors["node_energy"][i] = (out["node_energy"] - node_e0).detach()
                 ret_tensors["forces"][i] = out["forces"].detach()
@@ -299,9 +315,11 @@ class MACECalculator(Calculator):
                     ret_tensors["stress"][i] = out["stress"].detach()
             if self.model_type in ["DipoleMACE", "EnergyDipoleMACE"]:
                 ret_tensors["dipole"][i] = out["dipole"].detach()
+            if self.model_type == "EnergyChargesMACE":
+                ret_tensors["charges"][i] = out["charges"].detach()
 
         self.results = {}
-        if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+        if self.model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
             self.results["energy"] = (
                 torch.mean(ret_tensors["energies"], dim=0).cpu().item()
                 * self.energy_units_to_eV
@@ -354,6 +372,12 @@ class MACECalculator(Calculator):
                     .cpu()
                     .numpy()
                 )
+        if self.model_type in ["EnergyChargesMACE"]:
+            self.results["charges"] = (
+                torch.mean(ret_tensors["charges"], dim=0).cpu().numpy()
+            )
+            if self.num_models > 1:
+                self.results["charges_comm"] = ret_tensors["charges"].cpu().numpy()
 
     def get_hessian(self, atoms=None):
         if atoms is None and self.atoms is None:
