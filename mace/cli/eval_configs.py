@@ -97,6 +97,7 @@ def run(args: argparse.Namespace) -> None:
     contributions_list = []
     stresses_list = []
     forces_collection = []
+    charges_collections = []
 
     for batch in data_loader:
         batch = batch.to(device)
@@ -115,11 +116,24 @@ def run(args: argparse.Namespace) -> None:
         )
         forces_collection.append(forces[:-1])  # drop last as its empty
 
+        if output.get("charges", None) is not None:
+            charges = np.split(
+                torch_tools.to_numpy(output["charges"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )
+            charges_collections.append(charges[:-1])  # drop last as its empty
+
     energies = np.concatenate(energies_list, axis=0)
     forces_list = [
         forces for forces_list in forces_collection for forces in forces_list
     ]
     assert len(atoms_list) == len(energies) == len(forces_list)
+    if len(charges_collections) != 0:
+        charges_list = [
+            charges for charges_list in charges_collections for charges in charges_list
+        ]
+        assert len(atoms_list) == len(charges_list)
     if args.compute_stress:
         stresses = np.concatenate(stresses_list, axis=0)
         assert len(atoms_list) == stresses.shape[0]
@@ -139,6 +153,9 @@ def run(args: argparse.Namespace) -> None:
 
         if args.return_contributions:
             atoms.info[args.info_prefix + "BO_contributions"] = contributions[i]
+
+        if len(charges_collections) > 0:
+            atoms.arrays[args.info_prefix + "charges"] = charges_list[i]
 
     # Write atoms to output path
     ase.io.write(args.output, images=atoms_list, format="extxyz")
