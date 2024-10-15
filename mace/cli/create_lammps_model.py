@@ -1,9 +1,11 @@
+import os
 import argparse
+import warnings
 
 import torch
 from e3nn.util import jit
 
-from mace.calculators import LAMMPS_MACE
+from mace.calculators import LAMMPS_MACE, LAMMPS_MACE_CHARGE
 
 
 def parse_args():
@@ -26,6 +28,13 @@ def parse_args():
         nargs="?",
         help="Data type of the model to be converted to LAMMPS",
         default="float64",
+    )
+    parser.add_argument(
+        "--charge_cv_expr",
+        type=str,
+        nargs="?",
+        help="Expression of the charge CV",
+        default=None,
     )
     return parser.parse_args()
 
@@ -84,6 +93,30 @@ def main():
     )
     lammps_model_compiled = jit.compile(lammps_model)
     lammps_model_compiled.save(model_path + "-lammps.pt")
+
+    if args.charge_cv_expr is not None:
+        model_name = model._get_name()
+        if model_name != 'EnergyChargesMACE':
+            warnings.warn(
+                '{:s} is not a charge model!i '.format(args.model_path)
+                + ' Will ignore the given charge CV expression!'
+            )
+        else:
+            with open('charge_cv_expr.py', 'w') as fp:
+                function = 'import torch\n@torch.jit.script\n'
+                function += 'def function(c: torch.Tensor) -> torch.Tensor:\n'
+                function += '    return {:s}\n'.format(args.charge_cv_expr)
+                function += 'expr="{:s}"\n'.format(args.charge_cv_expr)
+                print(function, file=fp)
+            lammps_model = (
+                LAMMPS_MACE_CHARGE(model, head=head) if head is not None else
+                LAMMPS_MACE_CHARGE(model)
+            )
+            lammps_model_compiled = jit.compile(lammps_model)
+            lammps_model_compiled.save(
+                os.path.basename(model_path) + "-lammps_charge.pt"
+            )
+            os.remove('charge_cv_expr.py')
 
 
 if __name__ == "__main__":
