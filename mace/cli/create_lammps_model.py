@@ -9,7 +9,9 @@ from mace.calculators import LAMMPS_MACE, LAMMPS_MACE_CHARGE
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "model_path",
         type=str,
