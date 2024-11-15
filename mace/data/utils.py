@@ -260,6 +260,17 @@ def load_from_xyz(
                 atoms.info["REF_stress"] = atoms.get_stress()
             except Exception as e:  # pylint: disable=W0703
                 atoms.info["REF_stress"] = None
+    if charges_key == "charge" or charges_key == "charges":
+        logging.warning(
+            "Since ASE version 3.23.0b1, using charges_key 'charge' or 'charges' is no longer safe when communicating between MACE and ASE. We recommend using a different key, rewriting 'charge' or 'charges' to 'REF_charges'. You need to use --charges_key='REF_charges' to specify the chosen key name."
+        )
+        charges_key = "REF_charges"
+        for atoms in atoms_list:
+            try:
+                atoms.arrays["REF_charges"] = atoms.get_charges()
+            except Exception as e:
+                # logging.error(f"Failed to extract charges: {e}")
+                atoms.arrays["REF_charges"] = None
     if not isinstance(atoms_list, list):
         atoms_list = [atoms_list]
 
