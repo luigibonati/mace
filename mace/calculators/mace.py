@@ -246,7 +246,7 @@ class MACECalculator(Calculator):
             dipole = torch.zeros(num_models, 3, device=self.device)
             dict_of_tensors.update({"dipole": dipole})
         if model_type == "EnergyChargesMACE":
-            charges = torch.zeros(num_models, num_atoms, 1, device=self.device)
+            charges = torch.zeros(num_models, num_atoms, device=self.device)
             dict_of_tensors.update({"charges": charges})
         return dict_of_tensors
 
