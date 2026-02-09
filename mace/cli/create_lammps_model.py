@@ -2,13 +2,14 @@
 import argparse
 import copy
 import os
+import warnings
 
 os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 
 import torch
 from e3nn.util import jit
 
-from mace.calculators import LAMMPS_MACE
+from mace.calculators import LAMMPS_MACE, LAMMPS_MACE_CHARGE
 from mace.calculators.lammps_mliap_mace import LAMMPS_MLIAP_MACE
 from mace.cli.convert_e3nn_cueq import run as run_e3nn_to_cueq
 
@@ -41,6 +42,13 @@ def parse_args():
         type=str,
         help="Old libtorch format, or new mliap format",
         default="libtorch",
+    )
+    parser.add_argument(
+        "--charge_cv_expr",
+        type=str,
+        nargs="?",
+        help="Expression of the charge CV",
+        default=None,
     )
     return parser.parse_args()
 
@@ -108,6 +116,30 @@ def main():
     else:
         lammps_model_compiled = jit.compile(lammps_model)
         lammps_model_compiled.save(model_path + "-lammps.pt")
+
+    if args.charge_cv_expr is not None:
+        model_name = model._get_name()
+        if model_name != "EnergyChargesMACE":
+            warnings.warn(
+                f"{args.model_path} is not a charge model! Will ignore the given charge CV expression!"
+            )
+        else:
+            with open("charge_cv_expr.py", "w", encoding="utf-8") as fp:
+                function = "import torch\n@torch.jit.script\n"
+                function += "def function(c: torch.Tensor) -> torch.Tensor:\n"
+                function += f"    return {args.charge_cv_expr}\n"
+                function += f'expr="{args.charge_cv_expr}"\n'
+                print(function, file=fp)
+            lammps_model = (
+                LAMMPS_MACE_CHARGE(model, head=head)
+                if head is not None
+                else LAMMPS_MACE_CHARGE(model)
+            )
+            lammps_model_compiled = jit.compile(lammps_model)
+            lammps_model_compiled.save(
+                os.path.basename(model_path) + "-lammps_charge.pt"
+            )
+            os.remove("charge_cv_expr.py")
 
 
 if __name__ == "__main__":

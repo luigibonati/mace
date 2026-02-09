@@ -125,6 +125,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "DipoleMAE",
             "DipolePolarRMSE",
             "EnergyDipoleRMSE",
+            "EnergyChargesRMSE",
         ],
         default="PerAtomRMSE",
     )
@@ -143,6 +144,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "AtomicDipolesMACE",
             "AtomicDielectricMACE",
             "EnergyDipolesMACE",
+            "EnergyChargesMACE",
         ],
     )
     parser.add_argument(
@@ -672,6 +674,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "huber",
             "universal",
             "energy_forces_dipole",
+            "energy_forces_charges",
             "l1l2energyforces",
         ],
     )
@@ -723,12 +726,23 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--dipole_weight", help="weight of dipoles loss", type=float, default=1.0
     )
     parser.add_argument(
+        "--charges_weight", help="weight of charges loss", type=float, default=100.0
+    )
+    parser.add_argument(
         "--swa_dipole_weight",
         "--stage_two_dipole_weight",
         help="weight of dipoles after starting Stage Two (previously called swa)",
         type=float,
         default=1.0,
         dest="swa_dipole_weight",
+    )
+    parser.add_argument(
+        "--swa_charges_weight",
+        "--stage_two_charges_weight",
+        help="weight of charges after starting Stage Two (previously called swa)",
+        type=float,
+        default=1.0,
+        dest="swa_charges_weight",
     )
     parser.add_argument(
         "--swa_polarizability_weight",

@@ -238,6 +238,23 @@ def conditional_huber_forces(
     return reduce_loss(se, ddp)
 
 
+def weighted_mean_squared_error_charges(
+    ref: Batch, pred: TensorDict, ddp: Optional[bool] = None
+) -> torch.Tensor:
+    configs_weight = torch.repeat_interleave(
+        ref.weight, ref.ptr[1:] - ref.ptr[:-1]
+    ).unsqueeze(-1)
+    configs_charges_weight = torch.repeat_interleave(
+        ref.charges_weight, ref.ptr[1:] - ref.ptr[:-1]
+    ).unsqueeze(-1)
+    raw_loss = (
+        configs_weight
+        * configs_charges_weight
+        * torch.square(ref["charges"] - pred["charges"])
+    )
+    return reduce_loss(raw_loss, ddp)
+
+
 # ------------------------------------------------------------------------------
 # Loss Modules Combining Multiple Quantities
 # ------------------------------------------------------------------------------
@@ -622,4 +639,36 @@ class WeightedEnergyForcesL1L2Loss(torch.nn.Module):
         return (
             f"{self.__class__.__name__}(energy_weight={self.energy_weight:.3f}, "
             f"forces_weight={self.forces_weight:.3f})"
+        )
+
+
+class WeightedEnergyForcesChargesLoss(torch.nn.Module):
+    def __init__(self, energy_weight=1.0, forces_weight=1.0, charges_weight=1.0) -> None:
+        super().__init__()
+        self.register_buffer(
+            "energy_weight",
+            torch.tensor(energy_weight, dtype=torch.get_default_dtype()),
+        )
+        self.register_buffer(
+            "forces_weight",
+            torch.tensor(forces_weight, dtype=torch.get_default_dtype()),
+        )
+        self.register_buffer(
+            "charges_weight",
+            torch.tensor(charges_weight, dtype=torch.get_default_dtype()),
+        )
+
+    def forward(
+        self, ref: Batch, pred: TensorDict, ddp: Optional[bool] = None
+    ) -> torch.Tensor:
+        return (
+            self.energy_weight * weighted_mean_squared_error_energy(ref, pred, ddp)
+            + self.forces_weight * mean_squared_error_forces(ref, pred, ddp)
+            + self.charges_weight * weighted_mean_squared_error_charges(ref, pred, ddp)
+        )
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(energy_weight={self.energy_weight:.3f}, "
+            f"forces_weight={self.forces_weight:.3f}, charges_weight={self.charges_weight:.3f})"
         )

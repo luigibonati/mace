@@ -146,14 +146,15 @@ class MACECalculator(Calculator):
             "MACE",
             "DipoleMACE",
             "EnergyDipoleMACE",
+            "EnergyChargesMACE",
             "DipolePolarizabilityMACE",
         ]:
             raise ValueError(
-                f"Give a valid model_type: [MACE, DipoleMACE, DipolePolarizabilityMACE, EnergyDipoleMACE], {model_type} not supported"
+                f"Give a valid model_type: [MACE, DipoleMACE, DipolePolarizabilityMACE, EnergyDipoleMACE, EnergyChargesMACE], {model_type} not supported"
             )
 
         # superclass constructor initializes self.implemented_properties to an empty list
-        if model_type in ["MACE", "EnergyDipoleMACE"]:
+        if model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
             self.implemented_properties.extend(
                 [
                     "energy",
@@ -177,6 +178,8 @@ class MACECalculator(Calculator):
                     "polarizability_sh",
                 ]
             )
+        if model_type == "EnergyChargesMACE":
+            self.implemented_properties.extend(["charges"])
 
         if model_paths is not None:
             if isinstance(model_paths, str):
@@ -213,10 +216,12 @@ class MACECalculator(Calculator):
         if self.num_models > 1:
             logging.info(f"Running committee mace with {self.num_models} models")
 
-            if model_type in ["MACE", "EnergyDipoleMACE"]:
+            if model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
                 self.implemented_properties.extend(
                     ["energy_comm", "energy_var", "forces_comm", "stress_var"]
                 )
+            if model_type == "EnergyChargesMACE":
+                self.implemented_properties.extend(["charges_var"])
             if model_type in [
                 "DipoleMACE",
                 "EnergyDipoleMACE",
@@ -432,7 +437,7 @@ class MACECalculator(Calculator):
 
         batch_base = self._atoms_to_batch(atoms)
 
-        if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+        if self.model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
             compute_stress = not self.use_compile
         else:
             compute_stress = False
@@ -460,7 +465,7 @@ class MACECalculator(Calculator):
         # covert from ret_tensors to calculator results dict
         self.results = {}
         scalar_tensors = set(["energy"])
-        results_store_ensemble = set(["energy", "forces", "stress", "dipole"])
+        results_store_ensemble = set(["energy", "forces", "stress", "dipole", "charges"])
         for results_key, ret_key, unit_conv in [
             ("energy", "energy", self.energy_units_to_eV),
             ("node_energy", "node_energy", self.energy_units_to_eV),

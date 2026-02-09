@@ -408,6 +408,7 @@ def save_AtomicData_to_HDF5(data, i, h5_file) -> None:
     grp["forces_weight"] = data.forces_weight
     grp["stress_weight"] = data.stress_weight
     grp["virials_weight"] = data.virials_weight
+    grp["charges_weight"] = data.charges_weight
     grp["forces"] = data.forces
     grp["energy"] = data.energy
     grp["stress"] = data.stress
