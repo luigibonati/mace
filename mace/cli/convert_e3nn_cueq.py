@@ -9,7 +9,10 @@ from e3nn import o3
 from mace.modules.wrapper_ops import CuEquivarianceConfig
 from mace.tools.cg import O3_e3nn
 from mace.tools.cg_cueq_tools import symmetric_contraction_proj
-from mace.tools.scripts_utils import extract_config_mace_model
+from mace.tools.scripts_utils import (
+    extract_config_mace_model,
+    filter_config_for_model_init,
+)
 
 try:
     import cuequivariance as cue
@@ -203,6 +206,7 @@ def run(
         optimize_all=True,
         conv_fusion=(device == "cuda"),
     )
+    config = filter_config_for_model_init(source_model.__class__, config)
 
     # Create new model with cuequivariance config
     logging.info("Creating new model with cuequivariance settings")

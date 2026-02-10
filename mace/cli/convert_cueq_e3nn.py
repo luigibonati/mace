@@ -9,7 +9,10 @@ from e3nn import o3
 
 from mace.tools.cg import O3_e3nn
 from mace.tools.cg_cueq_tools import symmetric_contraction_proj
-from mace.tools.scripts_utils import extract_config_mace_model
+from mace.tools.scripts_utils import (
+    extract_config_mace_model,
+    filter_config_for_model_init,
+)
 
 try:
     import cuequivariance as cue
@@ -205,6 +208,7 @@ def run(input_model, output_model="_e3nn.model", device="cpu", return_model=True
 
     # Remove CuEq config
     config.pop("cueq_config", None)
+    config = filter_config_for_model_init(source_model.__class__, config)
 
     # Create new model without CuEq config
     logging.info("Creating new model without CuEq settings")

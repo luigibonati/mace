@@ -5,7 +5,10 @@ import os
 import torch
 
 from mace.modules.wrapper_ops import OEQConfig
-from mace.tools.scripts_utils import extract_config_mace_model
+from mace.tools.scripts_utils import (
+    extract_config_mace_model,
+    filter_config_for_model_init,
+)
 
 
 def run(
@@ -32,6 +35,7 @@ def run(
     config["oeq_config"] = OEQConfig(
         enabled=False, optimize_all=True, conv_fusion="atomic"
     )
+    config = filter_config_for_model_init(source_model.__class__, config)
 
     # Create new model with oeq config
     logging.info("Creating new model with openequivariance settings")

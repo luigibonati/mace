@@ -7,6 +7,8 @@ from e3nn.util import jit
 from scipy.spatial.transform import Rotation as R
 
 from mace import data, modules, tools
+from mace.modules.utils import get_edge_vectors_and_lengths
+from mace.tools.scatter import scatter_sum
 from mace.tools import torch_geometric
 
 torch.set_default_dtype(torch.float64)
@@ -289,6 +291,116 @@ def test_energy_dipole_mace():
         np.array(rot @ output["dipole"][0].detach().numpy()),
         output["dipole"][1].detach().numpy(),
     )
+
+
+
+def test_energy_charges_mace():
+    model_config = dict(
+        r_max=5,
+        num_bessel=8,
+        num_polynomial_cutoff=5,
+        max_ell=2,
+        interaction_cls=modules.interaction_classes[
+            "RealAgnosticResidualInteractionBlock"
+        ],
+        interaction_cls_first=modules.interaction_classes[
+            "RealAgnosticResidualInteractionBlock"
+        ],
+        num_interactions=2,
+        num_elements=2,
+        hidden_irreps=o3.Irreps("16x0e + 16x1o + 16x2e"),
+        MLP_irreps=o3.Irreps("16x0e"),
+        gate=torch.nn.functional.silu,
+        atomic_energies=atomic_energies,
+        avg_num_neighbors=3,
+        atomic_numbers=table.zs,
+        correlation=3,
+    )
+    model = modules.EnergyChargesMACE(**model_config)
+
+    atomic_data = data.AtomicData.from_config(config, z_table=table, cutoff=3.0)
+    atomic_data2 = data.AtomicData.from_config(
+        config_rotated, z_table=table, cutoff=3.0
+    )
+    data_loader = torch_geometric.dataloader.DataLoader(
+        dataset=[atomic_data, atomic_data2],
+        batch_size=2,
+        shuffle=False,
+        drop_last=False,
+    )
+    batch = next(iter(data_loader))
+    output = model(batch.to_dict(), training=True)
+
+    assert torch.allclose(output["energy"][0], output["energy"][1])
+    assert output["charges"] is not None
+    assert output["total_charge"] is not None
+    # Charges are scalar outputs, so they should be rotation-invariant.
+    assert torch.allclose(output["charges"][:3], output["charges"][3:])
+    total_charge_from_atoms = scatter_sum(
+        src=output["charges"], index=batch["batch"], dim=0, dim_size=2
+    )
+    assert torch.allclose(output["total_charge"], total_charge_from_atoms)
+
+
+def test_energy_charges_mace_lammps_mliap_path():
+    model_config = dict(
+        r_max=5,
+        num_bessel=8,
+        num_polynomial_cutoff=5,
+        max_ell=2,
+        interaction_cls=modules.interaction_classes[
+            "RealAgnosticResidualInteractionBlock"
+        ],
+        interaction_cls_first=modules.interaction_classes[
+            "RealAgnosticResidualInteractionBlock"
+        ],
+        num_interactions=2,
+        num_elements=2,
+        hidden_irreps=o3.Irreps("16x0e + 16x1o + 16x2e"),
+        MLP_irreps=o3.Irreps("16x0e"),
+        gate=torch.nn.functional.silu,
+        atomic_energies=atomic_energies,
+        avg_num_neighbors=3,
+        atomic_numbers=table.zs,
+        correlation=3,
+    )
+    model = modules.EnergyChargesMACE(**model_config)
+
+    atomic_data = data.AtomicData.from_config(config, z_table=table, cutoff=3.0)
+    data_loader = torch_geometric.dataloader.DataLoader(
+        dataset=[atomic_data],
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    batch = next(iter(data_loader)).to_dict()
+    vectors, _ = get_edge_vectors_and_lengths(
+        positions=batch["positions"],
+        edge_index=batch["edge_index"],
+        shifts=batch["shifts"],
+    )
+    lammps_batch = {
+        "vectors": vectors,
+        "node_attrs": batch["node_attrs"],
+        "edge_index": batch["edge_index"],
+        "batch": torch.zeros(batch["node_attrs"].shape[0], dtype=torch.int64),
+        "lammps_class": None,
+        "natoms": (batch["node_attrs"].shape[0], 0),
+    }
+    output = model(
+        lammps_batch,
+        training=False,
+        compute_force=False,
+        compute_virials=False,
+        compute_stress=False,
+        compute_edge_forces=True,
+        lammps_mliap=True,
+    )
+
+    assert output["charges"] is not None
+    assert output["charges"].shape[0] == batch["node_attrs"].shape[0]
+    assert output["edge_forces"] is not None
+    assert output["edge_forces"].shape == vectors.shape
 
 
 def test_mace_multi_reference():

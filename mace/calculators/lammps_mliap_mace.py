@@ -3,7 +3,7 @@ import os
 import sys
 import time
 from contextlib import contextmanager
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 from ase.data import chemical_symbols
@@ -28,6 +28,7 @@ class MACELammpsConfig:
         self.profile_end_step = int(os.environ.get("MACE_PROFILE_END", "10"))
         self.allow_cpu = self._get_env_bool("MACE_ALLOW_CPU", False)
         self.force_cpu = self._get_env_bool("MACE_FORCE_CPU", False)
+        self.debug_charges = self._get_env_bool("MACE_DEBUG_CHARGES", False)
 
     @staticmethod
     def _get_env_bool(var_name: str, default: bool) -> bool:
@@ -61,6 +62,7 @@ class MACEEdgeForcesWrapper(torch.nn.Module):
     def __init__(self, model: torch.nn.Module, **kwargs):
         super().__init__()
         self.model = model
+        self.is_charge_model = model._get_name() == "EnergyChargesMACE"
         self.register_buffer("atomic_numbers", model.atomic_numbers)
         self.register_buffer("r_max", model.r_max)
         self.register_buffer("num_interactions", model.num_interactions)
@@ -89,7 +91,7 @@ class MACEEdgeForcesWrapper(torch.nn.Module):
 
     def forward(
         self, data: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Compute energies and per-pair forces."""
         data["head"] = self.head
         data["total_charge"] = self.total_charge
@@ -108,12 +110,13 @@ class MACEEdgeForcesWrapper(torch.nn.Module):
 
         node_energy = out["node_energy"]
         pair_forces = out["edge_forces"]
+        charges = out["charges"] if self.is_charge_model else None
         total_energy = out["energy"][0]
 
         if pair_forces is None:
             pair_forces = torch.zeros_like(data["vectors"])
 
-        return total_energy, node_energy, pair_forces
+        return total_energy, node_energy, pair_forces, charges
 
 
 class LAMMPS_MLIAP_MACE(MLIAPUnified):
@@ -132,6 +135,8 @@ class LAMMPS_MLIAP_MACE(MLIAPUnified):
         self.device = "cpu"
         self.initialized = False
         self.step = 0
+        self._reported_data_attrs = False
+        self._warned_no_charge_path = False
 
     def _initialize_device(self, data):
         using_kokkos = "kokkos" in data.__class__.__module__.lower()
@@ -166,18 +171,28 @@ class LAMMPS_MLIAP_MACE(MLIAPUnified):
         if natoms == 0 or npairs <= 1:
             return
 
+        if self.config.debug_charges and not self._reported_data_attrs:
+            self._reported_data_attrs = True
+            try:
+                attrs = [a for a in dir(data) if not a.startswith("_")]
+                logging.warning("ML-IAP data attributes: %s", attrs)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logging.warning("Failed to inspect ML-IAP data attributes: %s", exc)
+
         with timer("total_step", enabled=self.config.debug_time):
             with timer("prepare_batch", enabled=self.config.debug_time):
                 batch = self._prepare_batch(data, natoms, nghosts, species)
 
             with timer("model_forward", enabled=self.config.debug_time):
-                _, atom_energies, pair_forces = self.model(batch)
+                _, atom_energies, pair_forces, atom_charges = self.model(batch)
 
                 if self.device.type != "cpu":
                     torch.cuda.synchronize()
 
             with timer("update_lammps", enabled=self.config.debug_time):
-                self._update_lammps_data(data, atom_energies, pair_forces, natoms)
+                self._update_lammps_data(
+                    data, atom_energies, pair_forces, atom_charges, natoms
+                )
 
     def _prepare_batch(self, data, natoms, nghosts, species):
         """Prepare the input batch for the MACE model."""
@@ -198,7 +213,14 @@ class LAMMPS_MLIAP_MACE(MLIAPUnified):
             "natoms": (natoms, nghosts),
         }
 
-    def _update_lammps_data(self, data, atom_energies, pair_forces, natoms):
+    def _update_lammps_data(
+        self,
+        data,
+        atom_energies: torch.Tensor,
+        pair_forces: torch.Tensor,
+        atom_charges: Optional[torch.Tensor],
+        natoms: int,
+    ):
         """Update LAMMPS data structures with computed energies and forces."""
         if self.dtype == torch.float32:
             pair_forces = pair_forces.double()
@@ -207,6 +229,60 @@ class LAMMPS_MLIAP_MACE(MLIAPUnified):
         eatoms.copy_(atom_energies_real)
         data.energy = atom_energies_real.sum().item()
         data.update_pair_forces_gpu(pair_forces)
+        if atom_charges is not None:
+            charges_real = atom_charges[:natoms].detach().reshape(-1)
+            if self.config.debug_charges:
+                logging.info(
+                    "Predicted charges stats: min=%.6g max=%.6g mean=%.6g",
+                    float(charges_real.min()),
+                    float(charges_real.max()),
+                    float(charges_real.mean()),
+                )
+            updated = False
+            # Prefer explicit updater hooks when available on the Kokkos bridge.
+            for update_fn in ("update_charges_gpu", "update_q_gpu"):
+                if hasattr(data, update_fn):
+                    try:
+                        getattr(data, update_fn)(charges_real)
+                        updated = True
+                        break
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        logging.debug("Charge updater %s failed: %s", update_fn, exc)
+            for charge_key in ("q", "charges", "qatoms"):
+                if updated:
+                    break
+                if hasattr(data, charge_key):
+                    try:
+                        q_values = torch.as_tensor(getattr(data, charge_key))
+                        charges_cast = charges_real.to(q_values.dtype)
+                        if q_values.numel() == charges_cast.numel():
+                            q_values.copy_(charges_cast.reshape_as(q_values))
+                            updated = True
+                        elif q_values.numel() >= natoms:
+                            q_values[:natoms].copy_(
+                                charges_cast[:natoms].reshape_as(q_values[:natoms])
+                            )
+                            updated = True
+                        else:
+                            logging.warning(
+                                "LAMMPS charge buffer '%s' is smaller than nlocal; skipping charge update.",
+                                charge_key,
+                            )
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        logging.debug(
+                            "Failed writing charges to data.%s: %s", charge_key, exc
+                        )
+            if (
+                self.config.debug_charges
+                and not updated
+                and not self._warned_no_charge_path
+            ):
+                self._warned_no_charge_path = True
+                available = [k for k in ("q", "charges", "qatoms") if hasattr(data, k)]
+                logging.warning(
+                    "No charge update path succeeded. Available charge attrs on data: %s",
+                    available,
+                )
 
     def _manage_profiling(self):
         if not self.config.debug_profile:

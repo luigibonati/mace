@@ -95,8 +95,14 @@ class MACECalculator(Calculator):
         **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
+        if enable_cueq:
+            assert model_type in [
+                "MACE",
+                "EnergyChargesMACE",
+            ], "CuEq only supports MACE and EnergyChargesMACE models"
+        if enable_oeq:
+            assert model_type == "MACE", "OEq only supports MACE models"
         if enable_cueq or enable_oeq:
-            assert model_type == "MACE", "CuEq only supports MACE models"
             if compile_mode is not None:
                 logging.warning(
                     "CuEq or Oeq does not support torch.compile, setting compile_mode to None"

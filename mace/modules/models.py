@@ -1449,12 +1449,12 @@ class EnergyChargesMACE(torch.nn.Module):
         gate: Optional[Callable],
         atomic_energies: Optional[np.ndarray],
         apply_cutoff: bool = True,  # pylint: disable=unused-argument
-        use_reduced_cg: bool = True,  # pylint: disable=unused-argument
+        use_reduced_cg: bool = True,
         use_so3: bool = False,  # pylint: disable=unused-argument
         distance_transform: str = "None",  # pylint: disable=unused-argument
         radial_MLP: Optional[List[int]] = None,
-        cueq_config: Optional[Dict[str, Any]] = None,  # pylint: disable=unused-argument
-        oeq_config: Optional[Dict[str, Any]] = None,  # pylint: disable=unused-argument
+        cueq_config: Optional[Dict[str, Any]] = None,
+        oeq_config: Optional[Dict[str, Any]] = None,
         edge_irreps: Optional[o3.Irreps] = None,  # pylint: disable=unused-argument
     ):
         super().__init__()
@@ -1469,7 +1469,7 @@ class EnergyChargesMACE(torch.nn.Module):
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
         self.node_embedding = LinearNodeEmbeddingBlock(
-            irreps_in=node_attr_irreps, irreps_out=node_feats_irreps
+            irreps_in=node_attr_irreps, irreps_out=node_feats_irreps, cueq_config=cueq_config
         )
         self.radial_embedding = RadialEmbeddingBlock(
             r_max=r_max,
@@ -1498,6 +1498,8 @@ class EnergyChargesMACE(torch.nn.Module):
             hidden_irreps=hidden_irreps,
             avg_num_neighbors=avg_num_neighbors,
             radial_MLP=radial_MLP,
+            cueq_config=cueq_config,
+            oeq_config=oeq_config,
         )
         self.interactions = torch.nn.ModuleList([inter])
 
@@ -1513,11 +1515,14 @@ class EnergyChargesMACE(torch.nn.Module):
             correlation=correlation,
             num_elements=num_elements,
             use_sc=use_sc_first,
+            cueq_config=cueq_config,
+            oeq_config=oeq_config,
+            use_reduced_cg=use_reduced_cg,
         )
         self.products = torch.nn.ModuleList([prod])
 
         self.readouts = torch.nn.ModuleList()
-        self.readouts.append(LinearChargeReadoutBlock(hidden_irreps))
+        self.readouts.append(LinearChargeReadoutBlock(hidden_irreps, cueq_config, oeq_config))
 
         for i in range(num_interactions - 1):
             if i == num_interactions - 2:
@@ -1535,6 +1540,8 @@ class EnergyChargesMACE(torch.nn.Module):
                 hidden_irreps=hidden_irreps_out,
                 avg_num_neighbors=avg_num_neighbors,
                 radial_MLP=radial_MLP,
+                cueq_config=cueq_config,
+                oeq_config=oeq_config,
             )
             self.interactions.append(inter)
             prod = EquivariantProductBasisBlock(
@@ -1543,17 +1550,20 @@ class EnergyChargesMACE(torch.nn.Module):
                 correlation=correlation,
                 num_elements=num_elements,
                 use_sc=True,
+                cueq_config=cueq_config,
+                oeq_config=oeq_config,
+                use_reduced_cg=use_reduced_cg,
             )
             self.products.append(prod)
             if i == num_interactions - 2:
                 self.readouts.append(
                     NonLinearChargeReadoutBlock(
-                        hidden_irreps_out, MLP_irreps, gate
+                        hidden_irreps_out, MLP_irreps, gate, cueq_config, oeq_config
                     )
                 )
             else:
                 self.readouts.append(
-                    LinearChargeReadoutBlock(hidden_irreps)
+                    LinearChargeReadoutBlock(hidden_irreps, cueq_config, oeq_config)
                 )
 
     def forward(
@@ -1564,48 +1574,44 @@ class EnergyChargesMACE(torch.nn.Module):
         compute_virials: bool = False,
         compute_stress: bool = False,
         compute_displacement: bool = False,
-        compute_edge_forces: bool = False,  # pylint: disable=unused-argument
-        compute_atomic_stresses: bool = False,  # pylint: disable=unused-argument
+        compute_edge_forces: bool = False,
+        compute_atomic_stresses: bool = False,
+        lammps_mliap: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
         # Setup
         data["node_attrs"].requires_grad_(True)
-        data["positions"].requires_grad_(True)
-        num_graphs = data["ptr"].numel() - 1
-        num_atoms_arange = torch.arange(data["positions"].shape[0])
-        displacement = torch.zeros(
-            (num_graphs, 3, 3),
-            dtype=data["positions"].dtype,
-            device=data["positions"].device,
+        ctx = prepare_graph(
+            data,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_displacement=compute_displacement,
+            lammps_mliap=lammps_mliap,
         )
-        if compute_virials or compute_stress or compute_displacement:
-            (
-                data["positions"],
-                data["shifts"],
-                displacement,
-            ) = get_symmetric_displacement(
-                positions=data["positions"],
-                unit_shifts=data["unit_shifts"],
-                cell=data["cell"],
-                edge_index=data["edge_index"],
-                num_graphs=num_graphs,
-                batch=data["batch"],
-            )
+        is_lammps = ctx.is_lammps
+        num_atoms_arange = ctx.num_atoms_arange.to(torch.int64)
+        num_graphs = ctx.num_graphs
+        displacement = ctx.displacement
+        positions = ctx.positions
+        vectors = ctx.vectors
+        lengths = ctx.lengths
+        cell = ctx.cell
+        node_heads = ctx.node_heads.to(torch.int64)
+        interaction_kwargs = ctx.interaction_kwargs
+        lammps_natoms = interaction_kwargs.lammps_natoms
+        lammps_class = interaction_kwargs.lammps_class
 
         # Atomic energies
         node_e0 = self.atomic_energies_fn(data["node_attrs"])[
-            num_atoms_arange, data["head"][data["batch"]]
+            num_atoms_arange, node_heads
         ]
         e0 = scatter_sum(
-            src=node_e0, index=data["batch"], dim=-1, dim_size=num_graphs
+            src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
+        ).to(
+            vectors.dtype
         )  # [n_graphs,]
 
         # Embeddings
         node_feats = self.node_embedding(data["node_attrs"])
-        vectors, lengths = get_edge_vectors_and_lengths(
-            positions=data["positions"],
-            edge_index=data["edge_index"],
-            shifts=data["shifts"],
-        )
         edge_attrs = self.spherical_harmonics(vectors)
         edge_feats, cutoff = self.radial_embedding(
             lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
@@ -1615,27 +1621,34 @@ class EnergyChargesMACE(torch.nn.Module):
         energies = [e0]
         node_energies_list = [node_e0]
         charges = []
-        for interaction, product, readout in zip(
-            self.interactions, self.products, self.readouts
+        for i, (interaction, product, readout) in enumerate(
+            zip(self.interactions, self.products, self.readouts)
         ):
+            node_attrs_slice = data["node_attrs"]
+            if is_lammps and i > 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
             node_feats, sc = interaction(
-                node_attrs=data["node_attrs"],
+                node_attrs=node_attrs_slice,
                 node_feats=node_feats,
                 edge_attrs=edge_attrs,
                 edge_feats=edge_feats,
                 edge_index=data["edge_index"],
                 cutoff=cutoff,
+                first_layer=(i == 0),
+                lammps_class=lammps_class,
+                lammps_natoms=lammps_natoms,
             )
+            if is_lammps and i == 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
             node_feats = product(
                 node_feats=node_feats,
                 sc=sc,
-                node_attrs=data["node_attrs"],
+                node_attrs=node_attrs_slice,
             )
             node_out = readout(node_feats).squeeze(-1)  # [n_nodes, ]
-            # node_energies = readout(node_feats).squeeze(-1)  # [n_nodes, ]
             node_energies = node_out[:, 0]
             energy = scatter_sum(
-                src=node_energies, index=data["batch"], dim=-1, dim_size=num_graphs
+                src=node_energies, index=data["batch"], dim=0, dim_size=num_graphs
             )  # [n_graphs,]
             energies.append(energy)
             node_energies_list.append(node_energies)
@@ -1658,24 +1671,41 @@ class EnergyChargesMACE(torch.nn.Module):
             dim_size=num_graphs,
         )  # [n_graphs,1]
 
-        forces, virials, stress, _, _ = get_outputs(
+        forces, virials, stress, _, edge_forces = get_outputs(
             energy=total_energy,
-            positions=data["positions"],
+            positions=positions,
             displacement=displacement,
-            cell=data["cell"],
+            vectors=vectors,
+            cell=cell,
             training=training,
             compute_force=compute_force,
             compute_virials=compute_virials,
             compute_stress=compute_stress,
+            compute_edge_forces=compute_edge_forces or compute_atomic_stresses,
         )
+
+        atomic_virials: Optional[torch.Tensor] = None
+        atomic_stresses: Optional[torch.Tensor] = None
+        if compute_atomic_stresses and edge_forces is not None:
+            atomic_virials, atomic_stresses = get_atomic_virials_stresses(
+                edge_forces=edge_forces,
+                edge_index=data["edge_index"],
+                vectors=vectors,
+                num_atoms=positions.shape[0],
+                batch=data["batch"],
+                cell=cell,
+            )
 
         output = {
             "energy": total_energy,
             "node_energy": node_energy,
             "contributions": contributions,
             "forces": forces,
+            "edge_forces": edge_forces,
             "virials": virials,
             "stress": stress,
+            "atomic_virials": atomic_virials,
+            "atomic_stresses": atomic_stresses,
             "displacement": displacement,
             "charges": atomic_charges,
             "total_charge": total_charge,

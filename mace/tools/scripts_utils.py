@@ -7,6 +7,7 @@
 import argparse
 import ast
 import dataclasses
+import inspect
 import json
 import logging
 import os
@@ -225,8 +226,8 @@ def print_git_commit():
 
 
 def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
-    if model.__class__.__name__ not in ["ScaleShiftMACE", "MACELES"]:
-        return {"error": "Model is not a ScaleShiftMACE or MACELES model"}
+    if model.__class__.__name__ not in ["ScaleShiftMACE", "MACELES", "EnergyChargesMACE"]:
+        return {"error": f"Model is not a ScaleShiftMACE, MACELES or EnergyChargesMACE model, got {model.__class__.__name__}"}
 
     def radial_to_name(radial_type):
         if radial_type == "BesselBasis":
@@ -246,8 +247,14 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
             return "Soft"
         return radial.distance_transform.__class__.__name__
 
-    scale = model.scale_shift.scale
-    shift = model.scale_shift.shift
+    # EnergyChargesMACE doesn't have scale_shift wrapper
+    if model.__class__.__name__ == "EnergyChargesMACE":
+        scale = torch.ones(1)
+        shift = torch.zeros(1)
+    else:
+        scale = model.scale_shift.scale
+        shift = model.scale_shift.shift
+    
     heads = model.heads if hasattr(model, "heads") else ["default"]
     model_mlp_irreps = (
         o3.Irreps(str(model.readouts[-1].hidden_irreps))
@@ -328,6 +335,35 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         config["only_dipole"] = False  # model.only_dipole
         config["gate"] = torch.nn.functional.silu
     return config
+
+
+def filter_config_for_model_init(
+    model_cls: type[torch.nn.Module], config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Drop config entries that are not accepted by model_cls.__init__."""
+    signature = inspect.signature(model_cls.__init__)
+    accepts_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
+    )
+    if accepts_kwargs:
+        return config
+
+    valid_keys = {
+        name
+        for name, param in signature.parameters.items()
+        if name != "self"
+        and param.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    dropped = set(config) - valid_keys
+    if dropped:
+        logging.debug(
+            "Ignoring unsupported constructor args for %s: %s",
+            model_cls.__name__,
+            sorted(dropped),
+        )
+    return {key: value for key, value in config.items() if key in valid_keys}
 
 
 def extract_load(f: str, map_location: str = "cpu") -> torch.nn.Module:

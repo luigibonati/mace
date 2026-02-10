@@ -4,7 +4,10 @@ import os
 
 import torch
 
-from mace.tools.scripts_utils import extract_config_mace_model
+from mace.tools.scripts_utils import (
+    extract_config_mace_model,
+    filter_config_for_model_init,
+)
 
 
 def run(input_model, output_model="_e3nn.model", device="cpu", return_model=True):
@@ -20,6 +23,7 @@ def run(input_model, output_model="_e3nn.model", device="cpu", return_model=True
 
     # Remove OEQ config
     config.pop("oeq_config", None)
+    config = filter_config_for_model_init(source_model.__class__, config)
 
     # Create new model without CuEq config
     logging.info("Creating new model without OEQ settings")
