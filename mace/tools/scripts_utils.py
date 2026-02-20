@@ -226,8 +226,14 @@ def print_git_commit():
 
 
 def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
-    if model.__class__.__name__ not in ["ScaleShiftMACE", "MACELES", "EnergyChargesMACE"]:
-        return {"error": f"Model is not a ScaleShiftMACE, MACELES or EnergyChargesMACE model, got {model.__class__.__name__}"}
+    if model.__class__.__name__ not in [
+        "ScaleShiftMACE",
+        "MACELES",
+        "EnergyChargesMACE",
+    ]:
+        return {
+            "error": f"Model is not a ScaleShiftMACE, MACELES or EnergyChargesMACE model, got {model.__class__.__name__}"
+        }
 
     def radial_to_name(radial_type):
         if radial_type == "BesselBasis":
@@ -254,7 +260,7 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
     else:
         scale = model.scale_shift.scale
         shift = model.scale_shift.shift
-    
+
     heads = model.heads if hasattr(model, "heads") else ["default"]
     model_mlp_irreps = (
         o3.Irreps(str(model.readouts[-1].hidden_irreps))
