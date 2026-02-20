@@ -471,7 +471,9 @@ class MACECalculator(Calculator):
         # covert from ret_tensors to calculator results dict
         self.results = {}
         scalar_tensors = set(["energy"])
-        results_store_ensemble = set(["energy", "forces", "stress", "dipole", "charges"])
+        results_store_ensemble = set(
+            ["energy", "forces", "stress", "dipole", "charges"]
+        )
         for results_key, ret_key, unit_conv in [
             ("energy", "energy", self.energy_units_to_eV),
             ("node_energy", "node_energy", self.energy_units_to_eV),

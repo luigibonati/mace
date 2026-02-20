@@ -339,7 +339,9 @@ class NonLinearChargeReadoutBlock(torch.nn.Module):
         )
         self.non_linearity = nn.Activation(irreps_in=self.hidden_irreps, acts=[gate])
         self.linear_2 = Linear(
-            irreps_in=self.hidden_irreps, irreps_out=self.irreps_out, cueq_config=cueq_config
+            irreps_in=self.hidden_irreps,
+            irreps_out=self.irreps_out,
+            cueq_config=cueq_config,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # [n_nodes, irreps]  # [..., ]

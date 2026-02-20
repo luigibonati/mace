@@ -643,7 +643,9 @@ class WeightedEnergyForcesL1L2Loss(torch.nn.Module):
 
 
 class WeightedEnergyForcesChargesLoss(torch.nn.Module):
-    def __init__(self, energy_weight=1.0, forces_weight=1.0, charges_weight=1.0) -> None:
+    def __init__(
+        self, energy_weight=1.0, forces_weight=1.0, charges_weight=1.0
+    ) -> None:
         super().__init__()
         self.register_buffer(
             "energy_weight",

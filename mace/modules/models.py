@@ -1469,7 +1469,9 @@ class EnergyChargesMACE(torch.nn.Module):
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
         self.node_embedding = LinearNodeEmbeddingBlock(
-            irreps_in=node_attr_irreps, irreps_out=node_feats_irreps, cueq_config=cueq_config
+            irreps_in=node_attr_irreps,
+            irreps_out=node_feats_irreps,
+            cueq_config=cueq_config,
         )
         self.radial_embedding = RadialEmbeddingBlock(
             r_max=r_max,
@@ -1522,7 +1524,9 @@ class EnergyChargesMACE(torch.nn.Module):
         self.products = torch.nn.ModuleList([prod])
 
         self.readouts = torch.nn.ModuleList()
-        self.readouts.append(LinearChargeReadoutBlock(hidden_irreps, cueq_config, oeq_config))
+        self.readouts.append(
+            LinearChargeReadoutBlock(hidden_irreps, cueq_config, oeq_config)
+        )
 
         for i in range(num_interactions - 1):
             if i == num_interactions - 2:
