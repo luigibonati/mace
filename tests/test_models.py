@@ -293,7 +293,6 @@ def test_energy_dipole_mace():
     )
 
 
-
 def test_energy_charges_mace():
     model_config = dict(
         r_max=5,
