@@ -250,4 +250,6 @@ def test_load_from_xyz_extracts_charge_from_ase_calc_results(tmp_path):
     for config, expected in zip(configs, ([0.1, -0.1], [0.2, -0.2])):
         assert config.property_weights["charges"] == 1.0
         assert config.properties["charges"] is not None
-        assert np.allclose(np.asarray(config.properties["charges"]).reshape(-1), expected)
+        assert np.allclose(
+            np.asarray(config.properties["charges"]).reshape(-1), expected
+        )
