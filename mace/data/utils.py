@@ -288,6 +288,45 @@ def load_from_xyz(
             except Exception as e:  # pylint: disable=W0703
                 atoms.info["REF_stress"] = None
 
+    charges_key = key_specification.arrays_keys.get("charges")
+    if charges_key is not None and not any(
+        charges_key in atoms.arrays for atoms in atoms_list
+    ):
+        logging.warning(
+            f"No charges found with key '{charges_key}' in atoms.arrays for '{file_path}'. "
+            "Attempting to recover charges from ASE outputs/alternative keys."
+        )
+        for atoms in atoms_list:
+            recovered_charges = None
+            try:
+                recovered_charges = atoms.get_charges()
+            except Exception:  # pylint: disable=broad-except
+                recovered_charges = None
+            if recovered_charges is None:
+                for alt_key in ("charges", "charge", "initial_charges"):
+                    alt_array = atoms.arrays.get(alt_key)
+                    if alt_array is not None:
+                        alt_array_np = np.asarray(alt_array)
+                        if (
+                            alt_array_np.ndim >= 1
+                            and alt_array_np.shape[0] == len(atoms)
+                        ):
+                            recovered_charges = alt_array
+                            break
+            if recovered_charges is None and atoms.calc is not None:
+                for alt_key in ("charges", "charge", "initial_charges"):
+                    alt_result = atoms.calc.results.get(alt_key)
+                    if alt_result is not None:
+                        alt_result_np = np.asarray(alt_result)
+                        if (
+                            alt_result_np.ndim >= 1
+                            and alt_result_np.shape[0] == len(atoms)
+                        ):
+                            recovered_charges = alt_result
+                            break
+            if recovered_charges is not None:
+                atoms.arrays[charges_key] = np.asarray(recovered_charges).reshape(len(atoms))
+
     final_energy_key = key_specification.info_keys["energy"]
     final_forces_key = key_specification.arrays_keys["forces"]
     final_dipole_key = key_specification.info_keys.get("dipole", "REF_dipole")

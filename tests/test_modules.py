@@ -17,6 +17,7 @@ from mace.modules import (
 )
 from mace.tools import AtomicNumberTable, scatter, to_numpy, torch_geometric
 from mace.tools.scripts_utils import dict_to_array
+from mace.tools.train import MACELoss
 
 
 @pytest.fixture(name="config")
@@ -167,6 +168,52 @@ def test_weighted_loss(config, table):
     assert out1 == 0.0
     out2 = loss2(batch, pred)
     assert out2 == 0.0
+
+
+def test_charge_metrics_respect_config_charges_weight():
+    class ZeroLoss(torch.nn.Module):
+        def forward(self, ref, pred):  # pylint: disable=unused-argument
+            return torch.tensor(
+                0.0, dtype=pred["charges"].dtype, device=pred["charges"].device
+            )
+
+    config_zero_weight = Configuration(
+        atomic_numbers=np.array([1, 1]),
+        positions=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]),
+        properties={"charges": np.array([0.0, 0.0])},
+        property_weights={"charges": 0.0},
+    )
+    config_unit_weight = Configuration(
+        atomic_numbers=np.array([1, 1]),
+        positions=np.array([[0.0, 0.0, 0.1], [0.0, 0.0, 0.84]]),
+        properties={"charges": np.array([0.0, 0.0])},
+        property_weights={"charges": 1.0},
+    )
+    table = AtomicNumberTable([1])
+    data_zero = AtomicData.from_config(config_zero_weight, z_table=table, cutoff=3.0)
+    data_one = AtomicData.from_config(config_unit_weight, z_table=table, cutoff=3.0)
+
+    batch = next(
+        iter(
+            torch_geometric.dataloader.DataLoader(
+                dataset=[data_zero, data_one],
+                batch_size=2,
+                shuffle=False,
+                drop_last=False,
+            )
+        )
+    )
+
+    metrics = MACELoss(loss_fn=ZeroLoss())
+    pred = {
+        # first config has large charge error but zero charge weight;
+        # second config has unit error and non-zero charge weight
+        "charges": torch.tensor([10.0, 10.0, 1.0, 1.0], dtype=batch.charges.dtype)
+    }
+    metrics.update(batch, pred)
+    _, aux = metrics.compute()
+
+    assert aux["rmse_c"] == pytest.approx(1.0)
 
 
 def test_symmetric_contraction():

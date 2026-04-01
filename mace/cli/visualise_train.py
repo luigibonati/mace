@@ -475,8 +475,10 @@ def model_inference(
         data_loader = all_data_loaders[name]
         logging.debug(f"Running inference on {name} dataset")
         scatter_metric = InferenceMetric().to(device)
+        has_batches = False
 
         for batch in data_loader:
+            has_batches = True
             batch = batch.to(device)
             batch_dict = batch.to_dict()
             output = model(
@@ -492,7 +494,8 @@ def model_inference(
         if distributed:
             torch.distributed.barrier()
 
-        results = scatter_metric.compute()
+        # Avoid calling compute() before any update() when a loader is empty.
+        results = scatter_metric.compute() if has_batches else {}
         results_dict[name] = results
         scatter_metric.reset()
 
