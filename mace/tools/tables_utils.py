@@ -39,7 +39,7 @@ def create_error_table(
     skip_heads: Optional[List[str]] = None,
 ) -> PrettyTable:
     if log_wandb:
-        import wandb
+        import wandb  # pylint: disable=import-error
     skip_heads = skip_heads or []
     table = PrettyTable()
     if table_type == "TotalRMSE":

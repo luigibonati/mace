@@ -236,6 +236,43 @@ def test_config_types(
     return test_by_ct
 
 
+def _reshape_if_per_atom(values: Any, num_atoms: int) -> Optional[np.ndarray]:
+    if values is None:
+        return None
+
+    values_np = np.asarray(values)
+    if values_np.ndim < 1 or values_np.shape[0] != num_atoms:
+        return None
+
+    return values_np.reshape(num_atoms)
+
+
+def _recover_per_atom_charges(atoms: ase.Atoms) -> Optional[np.ndarray]:
+    num_atoms = len(atoms)
+
+    try:
+        charges = _reshape_if_per_atom(atoms.get_charges(), num_atoms)
+    except Exception:  # pylint: disable=broad-except
+        charges = None
+    if charges is not None:
+        return charges
+
+    for alt_key in ("charges", "charge", "initial_charges"):
+        charges = _reshape_if_per_atom(atoms.arrays.get(alt_key), num_atoms)
+        if charges is not None:
+            return charges
+
+    if atoms.calc is None:
+        return None
+
+    for alt_key in ("charges", "charge", "initial_charges"):
+        charges = _reshape_if_per_atom(atoms.calc.results.get(alt_key), num_atoms)
+        if charges is not None:
+            return charges
+
+    return None
+
+
 def load_from_xyz(
     file_path: str,
     key_specification: KeySpecification,
@@ -297,35 +334,9 @@ def load_from_xyz(
             "Attempting to recover charges from ASE outputs/alternative keys."
         )
         for atoms in atoms_list:
-            recovered_charges = None
-            try:
-                recovered_charges = atoms.get_charges()
-            except Exception:  # pylint: disable=broad-except
-                recovered_charges = None
-            if recovered_charges is None:
-                for alt_key in ("charges", "charge", "initial_charges"):
-                    alt_array = atoms.arrays.get(alt_key)
-                    if alt_array is not None:
-                        alt_array_np = np.asarray(alt_array)
-                        if alt_array_np.ndim >= 1 and alt_array_np.shape[0] == len(
-                            atoms
-                        ):
-                            recovered_charges = alt_array
-                            break
-            if recovered_charges is None and atoms.calc is not None:
-                for alt_key in ("charges", "charge", "initial_charges"):
-                    alt_result = atoms.calc.results.get(alt_key)
-                    if alt_result is not None:
-                        alt_result_np = np.asarray(alt_result)
-                        if alt_result_np.ndim >= 1 and alt_result_np.shape[0] == len(
-                            atoms
-                        ):
-                            recovered_charges = alt_result
-                            break
+            recovered_charges = _recover_per_atom_charges(atoms)
             if recovered_charges is not None:
-                atoms.arrays[charges_key] = np.asarray(recovered_charges).reshape(
-                    len(atoms)
-                )
+                atoms.arrays[charges_key] = recovered_charges
 
     final_energy_key = key_specification.info_keys["energy"]
     final_forces_key = key_specification.arrays_keys["forces"]

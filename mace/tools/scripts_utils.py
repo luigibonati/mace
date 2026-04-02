@@ -959,7 +959,7 @@ def get_optimizer(
 
 def setup_wandb(args: argparse.Namespace):
     logging.info("Using Weights and Biases for logging")
-    import wandb
+    import wandb  # pylint: disable=import-error
 
     wandb_config = {}
     args_dict = vars(args)

@@ -186,7 +186,7 @@ def train(
     swa_start = True
     keep_last = False
     if log_wandb:
-        import wandb
+        import wandb  # pylint: disable=import-error
 
     if max_grad_norm is not None:
         logging.info(f"Using gradient clipping with tolerance={max_grad_norm:.3f}")
