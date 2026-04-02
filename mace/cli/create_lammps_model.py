@@ -118,7 +118,7 @@ def main():
         lammps_model_compiled.save(model_path + "-lammps.pt")
 
     if args.charge_cv_expr is not None:
-        model_name = model._get_name()
+        model_name = model._get_name()  # pylint: disable=protected-access
         if model_name != "EnergyChargesMACE":
             warnings.warn(
                 f"{args.model_path} is not a charge model! Will ignore the given charge CV expression!"

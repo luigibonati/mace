@@ -186,7 +186,7 @@ def train(
     swa_start = True
     keep_last = False
     if log_wandb:
-        import wandb
+        import wandb  # pylint: disable=import-error
 
     if max_grad_norm is not None:
         logging.info(f"Using gradient clipping with tolerance={max_grad_norm:.3f}")
@@ -699,9 +699,27 @@ class MACELoss(Metric):
                 spread_quantity_vector=False,
             )
         if output.get("charges") is not None and batch.charges is not None:
-            self.C_computed += 1.0
-            self.cs.append(batch.charges)
-            self.delta_cs.append(batch.charges - output["charges"])
+            pred_charges = output["charges"]
+            if (
+                pred_charges.shape != batch.charges.shape
+                and pred_charges.numel() == batch.charges.numel()
+            ):
+                pred_charges = pred_charges.reshape(batch.charges.shape)
+            delta_charges = batch.charges - pred_charges
+
+            # For charge metrics, mirror loss behavior and only include
+            # configurations with non-zero (config_weight * config_charges_weight).
+            per_atom_weight = torch.repeat_interleave(
+                batch.weight, batch.ptr[1:] - batch.ptr[:-1]
+            )
+            per_atom_charges_weight = torch.repeat_interleave(
+                batch.charges_weight, batch.ptr[1:] - batch.ptr[:-1]
+            )
+            valid = per_atom_weight * per_atom_charges_weight > 0
+            if torch.any(valid):
+                self.C_computed += 1.0
+                self.cs.append(batch.charges[valid].reshape(-1))
+                self.delta_cs.append(delta_charges[valid].reshape(-1))
 
     def convert(self, delta: Union[torch.Tensor, List[torch.Tensor]]) -> np.ndarray:
         if isinstance(delta, list):

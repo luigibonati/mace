@@ -20,6 +20,13 @@ def custom_key(key):
     return (2, key)
 
 
+def _format_scaled_metric(value, scale: float, fmt: str) -> str:
+    try:
+        return f"{float(value) * scale:{fmt}}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def create_error_table(
     table_type: str,
     all_data_loaders: dict,
@@ -32,7 +39,7 @@ def create_error_table(
     skip_heads: Optional[List[str]] = None,
 ) -> PrettyTable:
     if log_wandb:
-        import wandb
+        import wandb  # pylint: disable=import-error
     skip_heads = skip_heads or []
     table = PrettyTable()
     if table_type == "TotalRMSE":
@@ -275,8 +282,8 @@ def create_error_table(
                     f"{metrics['rmse_e_per_atom'] * 1000:8.1f}",
                     f"{metrics['rmse_f'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_f']:8.1f}",
-                    f"{metrics['rmse_c'] * 1000:8.1f}",
-                    f"{metrics['rel_rmse_c']:8.1f}",
+                    _format_scaled_metric(metrics["rmse_c"], 1000.0, "8.1f"),
+                    _format_scaled_metric(metrics["rel_rmse_c"], 1.0, "8.1f"),
                 ]
             )
     return table

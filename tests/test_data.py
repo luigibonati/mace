@@ -11,9 +11,12 @@ from mace.data import (
     AtomicData,
     Configuration,
     HDF5Dataset,
+    KeySpecification,
     config_from_atoms,
     get_neighborhood,
+    load_from_xyz,
     save_configurations_as_HDF5,
+    update_keyspec_from_kwargs,
 )
 from mace.tools import AtomicNumberTable, torch_geometric
 
@@ -214,3 +217,39 @@ def test_half_periodic():
         vectors[:, 2],
         np.zeros(vectors.shape[0]),
     )
+
+
+def test_load_from_xyz_extracts_charge_from_ase_calc_results(tmp_path):
+    xyz = tmp_path / "charges.xyz"
+    xyz.write_text(
+        (
+            "2\n"
+            'Properties=species:S:1:pos:R:3:forces:R:3:charge:R:1 energy=-1.0 pbc="F F F"\n'
+            "H 0.0 0.0 0.0  0.0 0.0 0.0  0.1\n"
+            "H 0.0 0.0 0.74 0.0 0.0 0.0 -0.1\n"
+            "2\n"
+            'Properties=species:S:1:pos:R:3:forces:R:3:charge:R:1 energy=-2.0 pbc="F F F"\n'
+            "H 0.0 0.0 0.0  0.0 0.0 0.0  0.2\n"
+            "H 0.0 0.0 0.74 0.0 0.0 0.0 -0.2\n"
+        ),
+        encoding="utf-8",
+    )
+
+    keyspec = KeySpecification.from_defaults()
+    update_keyspec_from_kwargs(
+        keyspec,
+        {"energy_key": "energy", "forces_key": "forces", "charges_key": "charge"},
+    )
+
+    _, configs = load_from_xyz(
+        file_path=str(xyz),
+        key_specification=keyspec,
+        config_type_weights={"Default": 1.0},
+    )
+    assert len(configs) == 2
+    for config, expected in zip(configs, ([0.1, -0.1], [0.2, -0.2])):
+        assert config.property_weights["charges"] == 1.0
+        assert config.properties["charges"] is not None
+        assert np.allclose(
+            np.asarray(config.properties["charges"]).reshape(-1), expected
+        )

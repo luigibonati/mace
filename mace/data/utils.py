@@ -236,6 +236,43 @@ def test_config_types(
     return test_by_ct
 
 
+def _reshape_if_per_atom(values: Any, num_atoms: int) -> Optional[np.ndarray]:
+    if values is None:
+        return None
+
+    values_np = np.asarray(values)
+    if values_np.ndim < 1 or values_np.shape[0] != num_atoms:
+        return None
+
+    return values_np.reshape(num_atoms)
+
+
+def _recover_per_atom_charges(atoms: ase.Atoms) -> Optional[np.ndarray]:
+    num_atoms = len(atoms)
+
+    try:
+        charges = _reshape_if_per_atom(atoms.get_charges(), num_atoms)
+    except Exception:  # pylint: disable=broad-except
+        charges = None
+    if charges is not None:
+        return charges
+
+    for alt_key in ("charges", "charge", "initial_charges"):
+        charges = _reshape_if_per_atom(atoms.arrays.get(alt_key), num_atoms)
+        if charges is not None:
+            return charges
+
+    if atoms.calc is None:
+        return None
+
+    for alt_key in ("charges", "charge", "initial_charges"):
+        charges = _reshape_if_per_atom(atoms.calc.results.get(alt_key), num_atoms)
+        if charges is not None:
+            return charges
+
+    return None
+
+
 def load_from_xyz(
     file_path: str,
     key_specification: KeySpecification,
@@ -287,6 +324,19 @@ def load_from_xyz(
                 atoms.info["REF_stress"] = atoms.get_stress()
             except Exception as e:  # pylint: disable=W0703
                 atoms.info["REF_stress"] = None
+
+    charges_key = key_specification.arrays_keys.get("charges")
+    if charges_key is not None and not any(
+        charges_key in atoms.arrays for atoms in atoms_list
+    ):
+        logging.warning(
+            f"No charges found with key '{charges_key}' in atoms.arrays for '{file_path}'. "
+            "Attempting to recover charges from ASE outputs/alternative keys."
+        )
+        for atoms in atoms_list:
+            recovered_charges = _recover_per_atom_charges(atoms)
+            if recovered_charges is not None:
+                atoms.arrays[charges_key] = recovered_charges
 
     final_energy_key = key_specification.info_keys["energy"]
     final_forces_key = key_specification.arrays_keys["forces"]
