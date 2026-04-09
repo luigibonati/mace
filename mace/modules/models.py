@@ -1681,12 +1681,22 @@ class EnergyChargesMACE(torch.nn.Module):
             displacement=displacement,
             vectors=vectors,
             cell=cell,
-            training=training,
+            training=True, #training, #TODO FIX THIS!
             compute_force=compute_force,
             compute_virials=compute_virials,
             compute_stress=compute_stress,
             compute_edge_forces=compute_edge_forces or compute_atomic_stresses,
         )
+
+        has_charge_cv = "charge_cv_fn" in data
+        print('has_charge_cv: ', has_charge_cv)
+        if has_charge_cv:
+            charge_cv_fn = data["charge_cv_fn"]
+            charge_cv = charge_cv_fn(atomic_charges)
+
+            charge_cv_grad = compute_charge_cv_gradients(charge_cv = charge_cv,
+                                                     positions=positions,
+                                                     training=training)
 
         atomic_virials: Optional[torch.Tensor] = None
         atomic_stresses: Optional[torch.Tensor] = None
@@ -1712,6 +1722,29 @@ class EnergyChargesMACE(torch.nn.Module):
             "atomic_stresses": atomic_stresses,
             "displacement": displacement,
             "charges": atomic_charges,
-            "total_charge": total_charge,
+            "total_charge": total_charge
         }
+        if has_charge_cv:
+            output["charge_cv"] = charge_cv
+            output["charge_cv_grad"] = charge_cv_grad
+
         return output
+
+
+def compute_charge_cv_gradients(
+    charge_cv: torch.Tensor, positions: torch.Tensor, training: bool = True
+) -> torch.Tensor:
+    grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(charge_cv)]
+    gradient = torch.autograd.grad(
+        outputs=[charge_cv],  # [n_graphs, ]
+        inputs=[positions],  # [n_nodes, 3]
+        grad_outputs=grad_outputs,
+        retain_graph=training,  # Make sure the graph is not destroyed during training
+        create_graph=training,  # Create graph for second derivative
+        allow_unused=True,  # For complete dissociation turn to true
+    )[
+        0
+    ]  # [n_nodes, 3]
+    if gradient is None:
+        return torch.zeros_like(positions)
+    return -1 * gradient
