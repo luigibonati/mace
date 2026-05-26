@@ -11,6 +11,7 @@ from mace.modules import (
     PolynomialCutoff,
     SymmetricContraction,
     WeightedEnergyForcesLoss,
+    WeightedEnergyForcesChargesLoss,
     WeightedHuberEnergyForcesStressLoss,
     compute_mean_rms_energy_forces,
     compute_statistics,
@@ -214,6 +215,62 @@ def test_charge_metrics_respect_config_charges_weight():
     _, aux = metrics.compute()
 
     assert aux["rmse_c"] == pytest.approx(1.0)
+
+
+def test_weighted_energy_forces_charges_loss_respects_config_charges_weight():
+    config_zero_weight = Configuration(
+        atomic_numbers=np.array([1, 1]),
+        positions=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]),
+        properties={
+            "charges": np.array([0.0, 0.0]),
+            "energy": 0.0,
+            "forces": np.zeros((2, 3)),
+        },
+        property_weights={"charges": 0.0, "energy": 1.0, "forces": 1.0},
+    )
+    config_unit_weight = Configuration(
+        atomic_numbers=np.array([1, 1]),
+        positions=np.array([[0.0, 0.0, 0.1], [0.0, 0.0, 0.84]]),
+        properties={
+            "charges": np.array([0.0, 0.0]),
+            "energy": 0.0,
+            "forces": np.zeros((2, 3)),
+        },
+        property_weights={"charges": 1.0, "energy": 1.0, "forces": 1.0},
+    )
+    table = AtomicNumberTable([1])
+    data_zero = AtomicData.from_config(config_zero_weight, z_table=table, cutoff=3.0)
+    data_one = AtomicData.from_config(config_unit_weight, z_table=table, cutoff=3.0)
+    batch = next(
+        iter(
+            torch_geometric.dataloader.DataLoader(
+                dataset=[data_zero, data_one],
+                batch_size=2,
+                shuffle=False,
+                drop_last=False,
+            )
+        )
+    )
+
+    pred_charges = torch.tensor(
+        [[10.0], [10.0], [1.0], [1.0]], dtype=batch.charges.dtype
+    )
+    pred_charges.requires_grad_()
+    loss = WeightedEnergyForcesChargesLoss(
+        energy_weight=0.0, forces_weight=0.0, charges_weight=1.0
+    )
+    pred = {
+        "energy": batch.energy,
+        "forces": batch.forces,
+        "charges": pred_charges,
+    }
+
+    out = loss(batch, pred)
+    out.backward()
+
+    assert out.item() == pytest.approx(1.0)
+    assert torch.all(pred_charges.grad[:2] == 0.0)
+    assert torch.all(pred_charges.grad[2:] != 0.0)
 
 
 def test_symmetric_contraction():

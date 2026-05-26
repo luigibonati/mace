@@ -224,7 +224,7 @@ def test_load_from_xyz_extracts_charge_from_ase_calc_results(tmp_path):
     xyz.write_text(
         (
             "2\n"
-            'Properties=species:S:1:pos:R:3:forces:R:3:charge:R:1 energy=-1.0 pbc="F F F"\n'
+            'Properties=species:S:1:pos:R:3:forces:R:3:charge:R:1 energy=-1.0 config_charges_weight=0.0 pbc="F F F"\n'
             "H 0.0 0.0 0.0  0.0 0.0 0.0  0.1\n"
             "H 0.0 0.0 0.74 0.0 0.0 0.0 -0.1\n"
             "2\n"
@@ -247,8 +247,10 @@ def test_load_from_xyz_extracts_charge_from_ase_calc_results(tmp_path):
         config_type_weights={"Default": 1.0},
     )
     assert len(configs) == 2
-    for config, expected in zip(configs, ([0.1, -0.1], [0.2, -0.2])):
-        assert config.property_weights["charges"] == 1.0
+    for config, expected, expected_weight in zip(
+        configs, ([0.1, -0.1], [0.2, -0.2]), (0.0, 1.0)
+    ):
+        assert config.property_weights["charges"] == expected_weight
         assert config.properties["charges"] is not None
         assert np.allclose(
             np.asarray(config.properties["charges"]).reshape(-1), expected

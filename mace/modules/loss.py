@@ -43,6 +43,25 @@ def reduce_loss(raw_loss: torch.Tensor, ddp: Optional[bool] = None) -> torch.Ten
     return raw_loss.mean()
 
 
+def reduce_loss_with_count(
+    raw_loss: torch.Tensor, num_elements: int, ddp: Optional[bool] = None
+) -> torch.Tensor:
+    ddp = is_ddp_enabled() if ddp is None else ddp
+    if ddp and dist.is_initialized():
+        world_size = dist.get_world_size()
+        loss_sum = raw_loss.sum()
+        total_samples = torch.tensor(
+            num_elements, device=raw_loss.device, dtype=raw_loss.dtype
+        )
+        dist.all_reduce(total_samples, op=dist.ReduceOp.SUM)
+        if total_samples.item() == 0:
+            return loss_sum
+        return loss_sum * world_size / total_samples
+    if num_elements == 0:
+        return raw_loss.sum()
+    return raw_loss.sum() / num_elements
+
+
 # ------------------------------------------------------------------------------
 # Energy Loss Functions
 # ------------------------------------------------------------------------------
@@ -241,18 +260,23 @@ def conditional_huber_forces(
 def weighted_mean_squared_error_charges(
     ref: Batch, pred: TensorDict, ddp: Optional[bool] = None
 ) -> torch.Tensor:
+    pred_charges = pred["charges"]
+    if (
+        pred_charges.shape != ref["charges"].shape
+        and pred_charges.numel() == ref["charges"].numel()
+    ):
+        pred_charges = pred_charges.reshape(ref["charges"].shape)
+
     configs_weight = torch.repeat_interleave(
         ref.weight, ref.ptr[1:] - ref.ptr[:-1]
-    ).unsqueeze(-1)
+    )
     configs_charges_weight = torch.repeat_interleave(
         ref.charges_weight, ref.ptr[1:] - ref.ptr[:-1]
-    ).unsqueeze(-1)
-    raw_loss = (
-        configs_weight
-        * configs_charges_weight
-        * torch.square(ref["charges"] - pred["charges"])
     )
-    return reduce_loss(raw_loss, ddp)
+    charge_weight = configs_weight * configs_charges_weight
+    raw_loss = charge_weight * torch.square(ref["charges"] - pred_charges)
+    valid = charge_weight > 0
+    return reduce_loss_with_count(raw_loss[valid], int(valid.sum().item()), ddp)
 
 
 # ------------------------------------------------------------------------------
