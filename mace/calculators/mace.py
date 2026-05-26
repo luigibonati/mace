@@ -92,6 +92,7 @@ class MACECalculator(Calculator):
         fullgraph=True,
         enable_cueq=False,
         enable_oeq=False,
+        charge_cv_fn=None,
         **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
@@ -186,6 +187,7 @@ class MACECalculator(Calculator):
             )
         if model_type == "EnergyChargesMACE":
             self.implemented_properties.extend(["charges"])
+            self.charge_cv_fn = charge_cv_fn
 
         if model_paths is not None:
             if isinstance(model_paths, str):
@@ -331,7 +333,7 @@ class MACECalculator(Calculator):
         for model in self.models:
             for param in model.parameters():
                 param.requires_grad = False
-
+  
     def check_state(self, atoms, tol: float = 1e-15) -> list:
         """
         Check for any system changes since the last calculation.
@@ -440,7 +442,6 @@ class MACECalculator(Calculator):
         """
         # call to base-class to set atoms attribute
         Calculator.calculate(self, atoms)
-
         batch_base = self._atoms_to_batch(atoms)
 
         if self.model_type in ["MACE", "EnergyDipoleMACE", "EnergyChargesMACE"]:
@@ -453,8 +454,14 @@ class MACECalculator(Calculator):
         # copy from output of model() call to ret_tensors
         for i, model in enumerate(self.models):
             batch = self._clone_batch(batch_base)
+
+            # add charge_cv_fn to batch if needed
+            batch_dict = batch.to_dict()
+            if self.model_type == "EnergyChargesMACE" and self.charge_cv_fn is not None:
+                batch_dict['charge_cv_fn'] = self.charge_cv_fn
+
             out = model(
-                batch.to_dict(),
+                batch_dict, #batch.to_dict(),
                 compute_stress=compute_stress,
                 training=self.use_compile,
                 compute_edge_forces=self.compute_atomic_stresses,
@@ -491,6 +498,8 @@ class MACECalculator(Calculator):
             ),
             ("dipole", "dipole", 1.0),
             ("charges", "charges", 1.0),
+            ("charges_cv", "charges_cv", 1.0),
+            ("charges_cv_grad", "charges_cv_grad", 1.0 / self.length_units_to_A),
             ("polarizability", "polarizability", 1.0),
             ("polarizability_sh", "polarizability_sh", 1.0),
         ]:
